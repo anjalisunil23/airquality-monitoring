@@ -24,9 +24,10 @@ COPY . .
 # Render web service port
 EXPOSE 10000
 
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD-SHELL curl -fsS http://127.0.0.1:${PORT:-10000}/health || exit 1
+    CMD curl -fsS http://127.0.0.1:${PORT:-10000}/health || exit 1
 
 # Start FastAPI
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
