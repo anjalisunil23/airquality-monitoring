@@ -21,7 +21,9 @@ def init_engine_and_session():
     is_sqlite = False
 
     try:
-        if "postgresql" in target_url:
+       if target_url.startswith(("postgres://", "postgresql://")):
+    if target_url.startswith("postgres://"):
+        target_url = target_url.replace("postgres://", "postgresql://", 1)
             # If database does not exist, try creating it via default maintenance db
             try:
                 test_engine = create_engine(
