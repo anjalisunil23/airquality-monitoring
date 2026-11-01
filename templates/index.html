@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Classroom Monitor — Real-Time Environmental Monitoring System</title>
+  <meta name="description" content="Modern real-time IoT dashboard for smart classroom environmental monitoring featuring ESP32, DHT22 sensor, FastAPI backend, and dynamic temperature/humidity adaptive themes.">
+
+  <!-- Typography: Inter & Plus Jakarta Sans from Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Dashboard Stylesheet -->
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+
+  <!-- Chart.js Library -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="dashboard-container">
+
+    <!-- ====================================================================
+         Header Section
+         ==================================================================== -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="brand-icon-wrapper" aria-hidden="true">
+          <!-- Smart Building / Classroom Icon -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+          </svg>
+        </div>
+        <div class="brand-titles">
+          <h1>Smart Classroom Monitor</h1>
+          <p>Real-Time Classroom Environmental Monitoring System</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Live Digital Clock -->
+        <div class="clock-widget" title="Local System Clock">
+          <span id="clock-time" class="clock-time">--:--:--</span>
+          <span id="clock-date" class="clock-date">Loading...</span>
+        </div>
+
+        <!-- ESP32 Connectivity Pill Badge -->
+        <div id="header-status-badge" class="connectivity-badge offline" title="Evaluated from real sensor telemetry (<15s)">
+          <span class="status-dot"></span>
+          <span id="header-status-text">ESP32 Offline</span>
+        </div>
+
+        <!-- Threshold Settings Button -->
+        <button id="btn-open-settings" class="btn btn-secondary" title="Configure Temperature & Humidity Thresholds">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          Thresholds
+        </button>
+
+        <!-- Test POST Reading Simulator Button -->
+        <button id="btn-open-sim" class="btn btn-secondary" title="Simulate ESP32 readings for faculty evaluation demo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          Test POST
+        </button>
+
+        <!-- Refresh Button -->
+        <button id="btn-refresh" class="btn btn-primary" title="Trigger Instant Refresh">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </header>
+
+    <!-- ====================================================================
+         Alert Banners (Hardware Offline, Errors, Empty State)
+         ==================================================================== -->
+    <div id="alert-offline" class="alert-banner alert-warning" role="alert">
+      <div class="alert-content">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+        <span><strong>ESP32 Sensor Idle / Offline:</strong> No telemetry has arrived in over 15 seconds. Ensure the ESP32 is powered and connected to Wi-Fi.</span>
+      </div>
+    </div>
+
+    <div id="alert-server-error" class="alert-banner alert-error" role="alert">
+      <div class="alert-content">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span id="alert-server-error-text">Backend server is unreachable. Please verify FastAPI is running at port 8000.</span>
+      </div>
+    </div>
+
+    <div id="alert-empty" class="alert-banner alert-info" role="alert">
+      <div class="alert-content">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+        <span><strong>Waiting for sensor data:</strong> No sensor readings in database yet. Power on ESP32 or use the "Test POST" button to transmit a sample reading.</span>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         Main Metric Cards Grid
+         ==================================================================== -->
+    <section class="metrics-grid" aria-label="Current Environmental Metrics">
+
+      <!-- 1. Temperature Card (Dynamic color system) -->
+      <article id="temp-card" class="metric-card" aria-labelledby="label-temp">
+        <div class="metric-card-header">
+          <div class="metric-title-group">
+            <span id="label-temp" class="metric-label">Temperature</span>
+            <span class="metric-sublabel">Classroom Ambient</span>
+          </div>
+          <div class="metric-icon-box" aria-hidden="true">
+            <!-- Thermometer Icon -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path>
+            </svg>
+          </div>
+        </div>
+
+        <div class="metric-card-body">
+          <div class="metric-value-row">
+            <span id="temp-value" class="metric-value">--</span>
+            <span class="metric-unit">°C</span>
+          </div>
+        </div>
+
+        <div class="metric-card-footer">
+          <span id="temp-status-badge" class="badge">Waiting...</span>
+          <div id="temp-trend" class="trend-indicator">
+            <span class="trend-stable">DHT22 Digital</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- 2. Relative Humidity Card (Dynamic color system) -->
+      <article id="hum-card" class="metric-card" aria-labelledby="label-hum">
+        <div class="metric-card-header">
+          <div class="metric-title-group">
+            <span id="label-hum" class="metric-label">Relative Humidity</span>
+            <span class="metric-sublabel">Moisture Content</span>
+          </div>
+          <div class="metric-icon-box" aria-hidden="true">
+            <!-- Droplet Icon -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+            </svg>
+          </div>
+        </div>
+
+        <div class="metric-card-body">
+          <div class="metric-value-row">
+            <span id="hum-value" class="metric-value">--</span>
+            <span class="metric-unit">%</span>
+          </div>
+        </div>
+
+        <div class="metric-card-footer">
+          <span id="hum-status-badge" class="badge">Waiting...</span>
+          <span id="hum-comfort-status" style="font-size: 0.775rem; color: var(--text-muted); font-weight: 500;" title="Illustrative humidity comfort indicator (DHT22 measures temperature and relative humidity)">Indoor Humidity Comfort</span>
+        </div>
+      </article>
+
+      <!-- 3. Device Status Card -->
+      <article id="device-card" class="metric-card" aria-labelledby="label-device">
+        <div class="metric-card-header">
+          <div class="metric-title-group">
+            <span id="label-device" class="metric-label">ESP32 Status</span>
+            <span class="metric-sublabel">Classroom Sensor Hub</span>
+          </div>
+          <div class="metric-icon-box" aria-hidden="true">
+            <!-- Microchip / WiFi Icon -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+              <rect x="9" y="9" width="6" height="6"></rect>
+              <line x1="9" y1="1" x2="9" y2="4"></line>
+              <line x1="15" y1="1" x2="15" y2="4"></line>
+              <line x1="9" y1="20" x2="9" y2="23"></line>
+              <line x1="15" y1="20" x2="15" y2="23"></line>
+              <line x1="20" y1="9" x2="23" y2="9"></line>
+              <line x1="20" y1="14" x2="23" y2="14"></line>
+              <line x1="1" y1="9" x2="4" y2="9"></line>
+              <line x1="1" y1="14" x2="4" y2="14"></line>
+            </svg>
+          </div>
+        </div>
+
+        <div class="metric-card-body">
+          <div class="metric-value-row">
+            <span id="device-status-text" class="metric-value" style="font-size: 1.85rem; color: #dc2626;">Offline</span>
+          </div>
+        </div>
+
+        <div class="metric-card-footer">
+          <span id="device-last-seen" style="font-size: 0.75rem; color: var(--text-muted);">No readings received</span>
+          <span id="device-seconds-ago" class="badge" style="background-color: var(--bg-surface-subtle); color: var(--text-body);">--</span>
+        </div>
+      </article>
+
+      <!-- 4. Total Readings Card -->
+      <article id="total-card" class="metric-card" aria-labelledby="label-total">
+        <div class="metric-card-header">
+          <div class="metric-title-group">
+            <span id="label-total" class="metric-label">Total Readings</span>
+            <span class="metric-sublabel">PostgreSQL Database</span>
+          </div>
+          <div class="metric-icon-box" aria-hidden="true">
+            <!-- Database Icon -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+            </svg>
+          </div>
+        </div>
+
+        <div class="metric-card-body">
+          <div class="metric-value-row">
+            <span id="total-readings-count" class="metric-value">0</span>
+            <span class="metric-unit">records</span>
+          </div>
+        </div>
+
+        <div class="metric-card-footer">
+          <span style="color: #16a34a; font-weight: 600; font-size: 0.775rem;">Persistent Storage</span>
+          <span style="color: var(--text-muted); font-size: 0.75rem;">Logging: ~5s</span>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- ====================================================================
+         Live Charts Section
+         ==================================================================== -->
+    <section class="charts-grid" aria-label="Environmental Trends Over Time">
+
+      <!-- Temperature Trend Line Chart -->
+      <article class="chart-card">
+        <div class="chart-header">
+          <div class="chart-title-group">
+            <h2>Temperature History (°C)</h2>
+            <p>Adaptive line color matching latest temperature threshold</p>
+          </div>
+          <span class="chart-legend-badge">Auto-refresh (3.5s)</span>
+        </div>
+        <div class="chart-wrapper">
+          <canvas id="tempChart" aria-label="Temperature Line Chart" role="img"></canvas>
+        </div>
+      </article>
+
+      <!-- Humidity Trend Line Chart -->
+      <article class="chart-card">
+        <div class="chart-header">
+          <div class="chart-title-group">
+            <h2>Relative Humidity History (%)</h2>
+            <p>Independent dynamic line color based on air moisture levels</p>
+          </div>
+          <span class="chart-legend-badge">Auto-refresh (3.5s)</span>
+        </div>
+        <div class="chart-wrapper">
+          <canvas id="humChart" aria-label="Humidity Line Chart" role="img"></canvas>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- ====================================================================
+         Recent Readings Table Section
+         ==================================================================== -->
+    <section class="table-card" aria-labelledby="recent-readings-heading">
+      <div class="table-header">
+        <div class="table-title-group">
+          <h2 id="recent-readings-heading">Recent Telemetry Readings</h2>
+          <p>Real-time stream of incoming DHT22 sensor readings (newest first)</p>
+        </div>
+        <div class="table-actions">
+          <button id="btn-export-csv" class="btn btn-secondary" title="Export readings as CSV spreadsheet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="readings-table" aria-label="Recent Sensor Readings">
+          <thead>
+            <tr>
+              <th scope="col">Timestamp</th>
+              <th scope="col">Temperature (°C)</th>
+              <th scope="col">Temperature Status</th>
+              <th scope="col">Humidity (%)</th>
+              <th scope="col">Humidity Status</th>
+              <th scope="col">Device ID</th>
+            </tr>
+          </thead>
+          <tbody id="readings-table-body">
+            <tr id="empty-state-row" class="empty-state-row">
+              <td colspan="6">
+                Waiting for sensor data. Power on your ESP32 or use "Test POST" above to send sample readings.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         Device & Architecture Information Grid
+         ==================================================================== -->
+    <section class="device-info-card" aria-labelledby="device-info-heading">
+      <div class="device-info-header">
+        <h2 id="device-info-heading">System Architecture & Hardware Specifications</h2>
+        <p>End-to-end embedded IoT stack deployed for classroom monitoring</p>
+      </div>
+
+      <div class="specs-grid">
+        <div class="spec-item">
+          <span class="spec-key">Device</span>
+          <span class="spec-val">ESP32 Classroom Sensor</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-key">Sensor</span>
+          <span class="spec-val">DHT22 (Digital Temp & RH)</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-key">Communication</span>
+          <span class="spec-val">Wi-Fi 802.11 b/g/n • HTTP REST</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-key">Backend</span>
+          <span class="spec-val">FastAPI (Python 3.12)</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-key">Database</span>
+          <span class="spec-val">PostgreSQL (SQLAlchemy ORM)</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-key">Containerization</span>
+          <span class="spec-val">Docker & Docker Compose</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         Footer
+         ==================================================================== -->
+    <footer class="dashboard-footer">
+      <div>
+        <span>Smart Classroom Environmental Monitoring System • MCA Project Demonstration</span>
+      </div>
+      <div class="footer-links">
+        <a href="/docs" target="_blank" rel="noopener">Interactive API Docs (/docs)</a>
+        <a href="/health" target="_blank" rel="noopener">Health Endpoint (/health)</a>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- ====================================================================
+       Modal: Threshold Settings (Live Configuration)
+       ==================================================================== -->
+  <div id="settings-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-settings-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-settings-title">Configure Evaluation Thresholds</h3>
+        <button type="button" class="modal-close-btn" onclick="closeModal('settings-modal')" aria-label="Close modal">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <form id="settings-form">
+        <div class="modal-body">
+          <p style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Adjust the project demonstration thresholds. Cards and charts update their dynamic colors immediately upon saving.
+          </p>
+
+          <h4 style="font-size: 0.875rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.75rem;">Temperature Ranges (°C)</h4>
+          <div class="form-group">
+            <label for="set-cool-max">Cool Threshold Maximum (&lt; Cool, e.g. 18°C)</label>
+            <input type="number" step="0.5" id="set-cool-max" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label for="set-comf-max">Comfortable Threshold Maximum (18°C – Comfort, e.g. 24°C)</label>
+            <input type="number" step="0.5" id="set-comf-max" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label for="set-warm-max">Warm Threshold Maximum (24°C – Warm, e.g. 30°C)</label>
+            <input type="number" step="0.5" id="set-warm-max" class="form-input" required>
+          </div>
+
+          <h4 style="font-size: 0.875rem; font-weight: 700; color: var(--text-main); margin: 1.25rem 0 0.75rem 0;">Relative Humidity Ranges (%)</h4>
+          <div class="form-group">
+            <label for="set-hum-low">Low Humidity Maximum (&lt; Low, e.g. 30%)</label>
+            <input type="number" step="1" id="set-hum-low" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label for="set-hum-norm">Normal Humidity Maximum (30% – Normal, e.g. 60%)</label>
+            <input type="number" step="1" id="set-hum-norm" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label for="set-hum-elev">Elevated Humidity Maximum (60% – Elevated, e.g. 70%)</label>
+            <input type="number" step="1" id="set-hum-elev" class="form-input" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('settings-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Thresholds</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       Modal: Test POST Reading Simulator
+       ==================================================================== -->
+  <div id="sim-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-sim-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-sim-title">Send Sample Reading (POST /api/readings)</h3>
+        <button type="button" class="modal-close-btn" onclick="closeModal('sim-modal')" aria-label="Close modal">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Send sample readings with realistic values to showcase the dynamic color changes to faculty evaluators.
+        </p>
+
+        <h4 style="font-size: 0.8125rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em;">
+          One-Click Demonstrations:
+        </h4>
+        <div class="quick-sim-buttons">
+          <button type="button" class="sim-btn" onclick="sendSampleReading(16.5, 45.0)">
+            <span class="sim-btn-title" style="color: #0284c7;">❄️ 16.5°C • 45.0%</span>
+            <span class="sim-btn-desc">Cool Blue State</span>
+          </button>
+          <button type="button" class="sim-btn" onclick="sendSampleReading(22.0, 52.0)">
+            <span class="sim-btn-title" style="color: #16a34a;">🌿 22.0°C • 52.0%</span>
+            <span class="sim-btn-desc">Comfortable Green State</span>
+          </button>
+          <button type="button" class="sim-btn" onclick="sendSampleReading(27.5, 65.0)">
+            <span class="sim-btn-title" style="color: #ea580c;">☀️ 27.5°C • 65.0%</span>
+            <span class="sim-btn-desc">Warm Amber & Elevated State</span>
+          </button>
+          <button type="button" class="sim-btn" onclick="sendSampleReading(32.5, 78.0)">
+            <span class="sim-btn-title" style="color: #dc2626;">🔥 32.5°C • 78.0%</span>
+            <span class="sim-btn-desc">Hot Red & High Humidity State</span>
+          </button>
+        </div>
+
+        <h4 style="font-size: 0.8125rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em; margin-top: 1.25rem; margin-bottom: 0.5rem;">
+          Or Custom Telemetry:
+        </h4>
+        <form id="custom-sim-form">
+          <div class="form-group">
+            <label for="sim-temp-input">Temperature (°C)</label>
+            <input type="number" step="0.1" id="sim-temp-input" class="form-input" value="23.5" required>
+          </div>
+          <div class="form-group">
+            <label for="sim-hum-input">Relative Humidity (%)</label>
+            <input type="number" step="0.1" id="sim-hum-input" class="form-input" value="50.0" required>
+          </div>
+          <div class="modal-footer" style="padding-top: 0.5rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('sim-modal')">Close</button>
+            <button type="submit" class="btn btn-primary">Transmit Reading</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard JavaScript -->
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

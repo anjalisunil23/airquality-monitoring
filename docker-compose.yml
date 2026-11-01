@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: classroom_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: classroom_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d classroom_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: .
+    container_name: classroom_monitor_web
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/classroom_db
+      - DEVICE_TIMEOUT_SECONDS=15
+      - TEMP_COOL_MAX=18.0
+      - TEMP_COMFORTABLE_MAX=24.0
+      - TEMP_WARM_MAX=30.0
+      - HUMIDITY_LOW_MAX=30.0
+      - HUMIDITY_NORMAL_MAX=60.0
+      - HUMIDITY_ELEVATED_MAX=70.0
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
