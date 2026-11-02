@@ -99,6 +99,20 @@ function initClock() {
 }
 
 // ==============================================================================
+// Timezone-safe UTC Date Parser
+// ==============================================================================
+function parseTimestamp(ts) {
+  if (!ts) return new Date();
+  if (typeof ts === 'string') {
+    // If the timestamp string lacks timezone indicator, treat it as UTC
+    if (!ts.endsWith('Z') && !ts.includes('+') && !ts.match(/-\d{2}:\d{2}$/)) {
+      return new Date(ts + 'Z');
+    }
+  }
+  return new Date(ts);
+}
+
+// ==============================================================================
 // Threshold Evaluation Helpers
 // ==============================================================================
 function evaluateTemperature(temp) {
@@ -375,7 +389,7 @@ function renderDashboard(data, devStatus) {
 
   // Latest reading is the first item (sorted desc)
   const latest = readings[0];
-  lastKnownReadingTime = new Date(latest.timestamp);
+  lastKnownReadingTime = parseTimestamp(latest.timestamp);
 
   // Evaluate dynamic colors
   const tempEval = evaluateTemperature(latest.temperature);
@@ -486,7 +500,7 @@ function updateDeviceStatusUI(devStatus, latest) {
   const offlineAlert = document.getElementById('alert-offline');
 
   const isOnline = devStatus ? devStatus.online : false;
-  const lastDate = new Date(latest.timestamp);
+  const lastDate = parseTimestamp(latest.timestamp);
   const timeFormatted = lastDate.toLocaleTimeString('en-US', { hour12: false });
 
   if (isOnline) {
@@ -575,7 +589,7 @@ function updateCharts(readings, tempEval, humEval) {
   const chronological = [...readings].reverse();
 
   const labels = chronological.map(r => {
-    const d = new Date(r.timestamp);
+    const d = parseTimestamp(r.timestamp);
     return d.toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
@@ -616,7 +630,7 @@ function updateTable(readings) {
 
   let html = '';
   displayList.forEach(item => {
-    const d = new Date(item.timestamp);
+    const d = parseTimestamp(item.timestamp);
     const timeStr = d.toLocaleTimeString('en-US', { hour12: false });
     const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 

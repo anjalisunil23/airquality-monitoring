@@ -69,11 +69,15 @@ def enrich_reading(reading: Reading) -> ReadingResponse:
     temp_info = get_temperature_status(reading.temperature)
     hum_info = get_humidity_status(reading.humidity)
 
+    ts = reading.timestamp
+    if ts and ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+
     return ReadingResponse(
         id=reading.id,
         temperature=round(reading.temperature, 2),
         humidity=round(reading.humidity, 2),
-        timestamp=reading.timestamp,
+        timestamp=ts,
         device_id=reading.device_id,
         temp_status=temp_info["status"],
         temp_code=temp_info["code"],
