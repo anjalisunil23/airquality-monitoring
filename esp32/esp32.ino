@@ -79,21 +79,22 @@ void updateBulbs(float temp) {
 }
 
 // ==============================================================================
-// 6. Connect to Wi-Fi (With Handshake Safety)
+// 6. Connect to Wi-Fi (With Full Reset & Diagnostics)
 // ==============================================================================
 void connectWiFi() {
   Serial.println("\nConnecting to Wi-Fi...");
-  Serial.printf("SSID: %s\n", WIFI_SSID);
+  Serial.printf("SSID: [%s]  Password Length: %d\n", WIFI_SSID, strlen(WIFI_PASSWORD));
 
-  WiFi.disconnect(true, true); // Reset Wi-Fi radio and clear old cache
-  delay(500);
+  WiFi.disconnect(true, true); // Full radio reset + clear stored credentials
+  delay(1000);
 
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  // Give hotspot up to 15 seconds to complete handshake
+  // Give hotspot up to 20 seconds (40 x 500ms)
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
     delay(500);
     Serial.print(".");
     attempts++;
@@ -107,7 +108,11 @@ void connectWiFi() {
     Serial.println(WiFi.localIP());
     Serial.printf("Signal (RSSI): %d dBm\n\n", WiFi.RSSI());
   } else {
-    Serial.println("\n[!] Wi-Fi connection in progress. Continuing to loop...");
+    // Print the actual WiFi status code to help diagnose
+    Serial.printf("\n[!] Wi-Fi FAILED. Status code: %d\n", WiFi.status());
+    Serial.println("    Codes: 1=NoSSID, 2=ScanCompleted, 3=Connected,");
+    Serial.println("           4=ConnectFailed, 5=ConnLost, 6=Disconnected");
+    Serial.println("    Check: hotspot ON? 2.4GHz? SSID/password correct?");
   }
 }
 
@@ -211,12 +216,14 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  // Reconnect Wi-Fi gently every 10 seconds if disconnected
+  // Reconnect Wi-Fi every 10 seconds if disconnected (full reset)
   if (currentMillis - lastWiFiCheck >= 10000) {
     lastWiFiCheck = currentMillis;
     if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("[WiFi] Reconnecting...");
-      WiFi.reconnect();
+      Serial.printf("[WiFi] Disconnected (status %d). Reconnecting...\n", WiFi.status());
+      WiFi.disconnect();
+      delay(500);
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     }
   }
 
