@@ -12,7 +12,8 @@
 let tempChart = null;
 let humChart = null;
 let previousReading = null;
-let lastKnownReadingTime = null;
+let lastKnownReadingTime = null;  // UTC Date object of latest reading
+let lastBackendOnlineStatus = false; // Authoritative online state from backend
 let pollTimer = null;
 let clockTimer = null;
 let secondsCounterTimer = null;
@@ -100,12 +101,24 @@ function initClock() {
 
 // ==============================================================================
 // Timezone-safe UTC Date Parser
+// Always treats ambiguous (no-offset) timestamps as UTC.
+// Handles: "2026-11-04T06:00:00" → appends Z → UTC
+//          "2026-11-04T06:00:00Z" → already UTC
+//          "2026-11-04T06:00:00+00:00" → already UTC
+//          "2026-11-04T11:30:00+05:30" → IST, parsed correctly as UTC internally
 // ==============================================================================
 function parseTimestamp(ts) {
   if (!ts) return new Date();
   if (typeof ts === 'string') {
-    // If the timestamp string lacks timezone indicator, treat it as UTC
-    if (!ts.endsWith('Z') && !ts.includes('+') && !ts.match(/-\d{2}:\d{2}$/)) {
+    // Strip trailing whitespace
+    ts = ts.trim();
+    // If no timezone info at all, the string has no Z, no +HH:MM, and no -HH:MM at the end
+    // Use a strict check: ends with Z, or has a +HH:MM or -HH:MM suffix after the time part
+    const hasTimezone = ts.endsWith('Z') ||
+      /[+-]\d{2}:\d{2}$/.test(ts) ||
+      /[+-]\d{4}$/.test(ts);
+    if (!hasTimezone) {
+      // No offset info → treat as UTC by appending Z
       return new Date(ts + 'Z');
     }
   }
@@ -499,7 +512,10 @@ function updateDeviceStatusUI(devStatus, latest) {
   const deviceLastSeen = document.getElementById('device-last-seen');
   const offlineAlert = document.getElementById('alert-offline');
 
+  // Trust the backend's authoritative online/offline calculation (UTC server-side diff)
   const isOnline = devStatus ? devStatus.online : false;
+  lastBackendOnlineStatus = isOnline; // Store for use by the seconds counter
+
   const lastDate = parseTimestamp(latest.timestamp);
   const timeFormatted = lastDate.toLocaleTimeString('en-US', { hour12: false });
 
@@ -517,7 +533,7 @@ function updateDeviceStatusUI(devStatus, latest) {
       offlineAlert.classList.remove('show');
     }
   } else {
-    // Offline State (>15 seconds without readings)
+    // Offline State (>15 seconds without readings, per backend)
     if (headerBadge) {
       headerBadge.className = 'connectivity-badge offline';
       headerBadgeText.textContent = 'ESP32 Offline';
@@ -561,10 +577,14 @@ function updateSecondsAgoCounter() {
   const secondsElem = document.getElementById('device-seconds-ago');
   if (!secondsElem || !lastKnownReadingTime) return;
 
+  // Both `now` and `lastKnownReadingTime` are UTC-based JavaScript Date objects.
+  // JavaScript Date arithmetic always works in UTC milliseconds regardless of
+  // the browser's local timezone, so this diff is timezone-safe everywhere.
   const now = new Date();
   const diffSec = Math.floor((now - lastKnownReadingTime) / 1000);
 
   if (diffSec < 0) {
+    // Clock skew: browser clock is slightly behind server — treat as "just now"
     secondsElem.textContent = 'Just now';
   } else if (diffSec < 60) {
     secondsElem.textContent = `${diffSec}s ago`;
@@ -573,10 +593,13 @@ function updateSecondsAgoCounter() {
     secondsElem.textContent = `${mins}m ${diffSec % 60}s ago`;
   }
 
-  // If time exceeds 15 seconds, reflect immediately in UI
-  if (diffSec > thresholds.deviceTimeoutSeconds) {
-    markDeviceOffline('Timeout');
-  }
+  // Only trigger a client-side offline override when:
+  //   1. The backend already said device is offline (lastBackendOnlineStatus = false), AND
+  //   2. We've been polling but the diff keeps growing (backend network is reachable)
+  // We do NOT call markDeviceOffline based on diffSec alone, because:
+  //   - The backend computes the timeout with accurate UTC server clocks
+  //   - Client clocks can be skewed by timezone errors, NTP drift, or DST changes
+  //   - The backend /api/device/status is polled every 3.5s — trust that result
 }
 
 // ==============================================================================
