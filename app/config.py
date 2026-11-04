@@ -31,7 +31,7 @@ DEFAULT_DEVICE_ID = "esp32-classroom-01"
 # ==============================================================================
 TEMP_THRESHOLDS = {
     "cool_max": float(os.getenv("TEMP_COOL_MAX", "18.0")),
-    "comfortable_max": float(os.getenv("TEMP_COMFORTABLE_MAX", "24.0")),
+    "comfortable_max": float(os.getenv("TEMP_COMFORTABLE_MAX", "25.0")),
     "warm_max": float(os.getenv("TEMP_WARM_MAX", "30.0")),
 }
 

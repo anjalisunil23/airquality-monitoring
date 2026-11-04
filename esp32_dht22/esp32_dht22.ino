@@ -1,88 +1,97 @@
 /*
  * ==============================================================================
  * Smart Classroom Environmental Monitoring System
- * ESP32 + DHT22 + Multi-LED Indicator -> Live Render Cloud Dashboard
+ * ESP32 + DHT22 + Dual Bulb Control (White & Red) -> Live Render Cloud Dashboard
  * ==============================================================================
- * Live Dashboard: https://airquality-monitoring.onrender.com/
- * Target Endpoint: https://airquality-monitoring.onrender.com/api/readings
+ * Dashboard : https://airquality-monitoring.onrender.com/
+ * Endpoint  : https://airquality-monitoring.onrender.com/api/readings
  *
  * Hardware Wiring:
- *   DHT22 DATA (Pin 2)  --> ESP32 GPIO 4 (with 10k pull-up to 3.3V)
- *   DHT22 VCC  (Pin 1)  --> ESP32 3V3 (or VIN 5V)
+ *   DHT22 DATA (Pin 2)  --> ESP32 GPIO 4 (with 10k resistor to 3.3V)
+ *   DHT22 VCC  (Pin 1)  --> ESP32 3V3
  *   DHT22 GND  (Pin 4)  --> ESP32 GND
  *
- *   Green LED  (+)      --> ESP32 GPIO 16 (via 220Ω resistor)
- *   Yellow LED (+)      --> ESP32 GPIO 17 (via 220Ω resistor)
- *   Red LED    (+)      --> ESP32 GPIO 18 (via 220Ω resistor)
- *   LED Cathodes (-)    --> ESP32 GND
+ *   White Bulb/LED (+)  --> ESP32 GPIO 17 (via 220Ω resistor or relay)
+ *   Red Bulb/LED (+)    --> ESP32 GPIO 18 (via 220Ω resistor or relay)
+ *   Bulb/LED Cathodes(-)-> ESP32 GND
  * ==============================================================================
  */
 
 #include <WiFi.h>
-#include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include "DHT.h"
 
 // ==============================================================================
 // 1. Wi-Fi Configuration
 // ==============================================================================
-// Replace with your 2.4 GHz Wi-Fi credentials (ESP32 does not support 5 GHz Wi-Fi)
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID     = "Anjali";     // Wi-Fi or Hotspot Name (2.4 GHz)
+const char* WIFI_PASSWORD = "12345678";   // Wi-Fi Password
 
 // ==============================================================================
-// 2. Cloud Dashboard Endpoint
+// 2. Cloud Server Endpoint
 // ==============================================================================
 const char* SERVER_URL    = "https://airquality-monitoring.onrender.com/api/readings";
 const char* DEVICE_ID     = "esp32-classroom-01";
 
 // ==============================================================================
-// 3. Hardware Pin Definitions & Sensor Setup
+// 3. Hardware Pin Definitions
 // ==============================================================================
 #define DHTPIN 4
 #define DHTTYPE DHT22
-
-// LED GPIO pins
-#define GREEN_LED 16
-#define YELLOW_LED 17
-#define RED_LED 18
-
-// Temperature thresholds (°C)
-#define NORMAL_TEMP 25.0
-#define HIGH_TEMP 30.0
-
 DHT dht(DHTPIN, DHTTYPE);
 
-// Non-blocking timer variables
-const unsigned long TELEMETRY_INTERVAL_MS = 5000; // Transmit every 5 seconds
-unsigned long lastTelemetryTime = 0;
+#define WHITE_LED 17  // White Bulb (GPIO 17)
+#define RED_LED   18  // Red Bulb (GPIO 18)
 
-const unsigned long WIFI_CHECK_INTERVAL_MS = 5000;
-unsigned long lastWiFiCheckTime = 0;
+// Temperature Threshold (°C)
+#define COMFORTABLE_TEMP 25.0
 
 // ==============================================================================
-// LED Control Helper
+// 4. Timing Variables
 // ==============================================================================
-void setLEDs(bool green, bool yellow, bool red) {
-  digitalWrite(GREEN_LED, green ? HIGH : LOW);
-  digitalWrite(YELLOW_LED, yellow ? HIGH : LOW);
-  digitalWrite(RED_LED, red ? HIGH : LOW);
+const unsigned long SENSOR_INTERVAL = 2500; // Read sensor every 2.5s
+const unsigned long UPLOAD_INTERVAL = 5000; // Upload telemetry every 5s
+
+unsigned long lastSensorRead = 0;
+unsigned long lastUpload     = 0;
+unsigned long lastWiFiCheck  = 0;
+
+float temperature = 0.0;
+float humidity    = 0.0;
+bool hasValidReading = false;
+
+// ==============================================================================
+// 5. Bulb / LED Control Logic
+// ==============================================================================
+void updateBulbs(float temp) {
+  if (temp < COMFORTABLE_TEMP) {
+    // Below 25.0°C: Comfortable -> White Bulb ON, Red Bulb OFF
+    digitalWrite(WHITE_LED, HIGH);
+    digitalWrite(RED_LED, LOW);
+    Serial.printf("[BULB] Temp: %.2f °C | Status: COMFORTABLE (< 25°C) -> WHITE BULB ON\n", temp);
+  } else {
+    // 25.0°C and above: Warm / Alert -> Red Bulb ON, White Bulb OFF
+    digitalWrite(WHITE_LED, LOW);
+    digitalWrite(RED_LED, HIGH);
+    Serial.printf("[BULB] Temp: %.2f °C | Status: WARM / ALERT (>= 25°C) -> RED BULB ON\n", temp);
+  }
 }
 
 // ==============================================================================
-// Wi-Fi Connection Routine
+// 6. Connect to Wi-Fi (With Handshake Safety)
 // ==============================================================================
-void connectToWiFi() {
-  Serial.println();
-  Serial.println("==================================================");
-  Serial.print("[WiFi] Connecting to network: ");
-  Serial.println(WIFI_SSID);
+void connectWiFi() {
+  Serial.println("\nConnecting to Wi-Fi...");
+  Serial.printf("SSID: %s\n", WIFI_SSID);
+
+  WiFi.disconnect(true, true); // Reset Wi-Fi radio and clear old cache
+  delay(500);
 
   WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
+  // Give hotspot up to 15 seconds to complete handshake
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 30) {
     delay(500);
@@ -91,142 +100,137 @@ void connectToWiFi() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println();
-    Serial.println("[WiFi] Connected successfully!");
-    Serial.print("[WiFi] ESP32 IP Address: ");
+    Serial.println("\n==================================");
+    Serial.println("  WI-FI CONNECTED SUCCESSFULLY!   ");
+    Serial.println("==================================");
+    Serial.print("ESP32 IP: ");
     Serial.println(WiFi.localIP());
-    Serial.print("[WiFi] Signal Strength (RSSI): ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm");
+    Serial.printf("Signal (RSSI): %d dBm\n\n", WiFi.RSSI());
   } else {
-    Serial.println();
-    Serial.println("[WiFi Alert] Connection failed. Will retry in background...");
+    Serial.println("\n[!] Wi-Fi connection in progress. Continuing to loop...");
   }
-  Serial.println("==================================================");
 }
 
 // ==============================================================================
-// Telemetry HTTPS POST Transmission
+// 7. Read DHT22 Sensor
 // ==============================================================================
-void sendTelemetry(float temperature, float humidity) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[HTTP] Cannot send: ESP32 is not connected to Wi-Fi.");
+void readSensor() {
+  float newHum  = dht.readHumidity();
+  float newTemp = dht.readTemperature();
+
+  if (isnan(newHum) || isnan(newTemp)) {
+    Serial.println("[Sensor Alert] Failed to read from DHT22!");
     return;
   }
 
-  // Build JSON payload
-  char jsonPayload[128];
-  snprintf(jsonPayload, sizeof(jsonPayload),
-           "{\"temperature\": %.2f, \"humidity\": %.2f, \"device_id\": \"%s\"}",
-           temperature, humidity, DEVICE_ID);
+  temperature = newTemp;
+  humidity    = newHum;
+  hasValidReading = true;
 
-  Serial.print("[HTTP POST] Payload: ");
-  Serial.println(jsonPayload);
+  Serial.println("---------------------------------------");
+  Serial.printf("Sensor Reading: %.2f °C | Humidity: %.2f %%\n", temperature, humidity);
+  updateBulbs(temperature);
+}
 
-  // Use WiFiClientSecure for HTTPS connection to Render
+// ==============================================================================
+// 8. Upload Telemetry to Live Cloud Dashboard
+// ==============================================================================
+void uploadData() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Upload] Skipped: Waiting for Wi-Fi...");
+    return;
+  }
+
+  if (!hasValidReading) {
+    Serial.println("[Upload] Skipped: Waiting for first valid sensor reading...");
+    return;
+  }
+
   WiFiClientSecure client;
-  client.setInsecure(); // Bypass CA certificate check on embedded device
+  client.setInsecure(); // Required for Render HTTPS connection
 
   HTTPClient http;
+  http.setTimeout(10000);
+
   if (http.begin(client, SERVER_URL)) {
     http.addHeader("Content-Type", "application/json");
-    http.setTimeout(10000); // 10-second timeout
 
-    int httpCode = http.POST(jsonPayload);
+    char payload[128];
+    snprintf(payload, sizeof(payload),
+             "{\"temperature\": %.2f, \"humidity\": %.2f, \"device_id\": \"%s\"}",
+             temperature, humidity, DEVICE_ID);
 
-    if (httpCode > 0) {
-      String response = http.getString();
-      if (httpCode == 201 || httpCode == 200) {
-        Serial.printf("[HTTP %d Success] Dashboard Updated: %s\n", httpCode, response.c_str());
-      } else {
-        Serial.printf("[HTTP %d Warning] Server response: %s\n", httpCode, response.c_str());
-      }
+    Serial.printf("[HTTP POST] Uploading: %s\n", payload);
+    int httpCode = http.POST(payload);
+
+    if (httpCode == 200 || httpCode == 201) {
+      Serial.println("[SUCCESS 201] Live Dashboard Updated Successfully!");
     } else {
-      Serial.printf("[HTTP Error] Connection failed: %s\n", http.errorToString(httpCode).c_str());
+      Serial.printf("[HTTP %d] Server Response: %s\n", httpCode, http.getString().c_str());
     }
     http.end();
   } else {
-    Serial.println("[HTTP Error] Unable to connect to host.");
+    Serial.println("[HTTP Error] Unable to connect to Render host.");
   }
+  Serial.println("---------------------------------------");
 }
 
 // ==============================================================================
-// Arduino Setup
+// 9. Setup
 // ==============================================================================
 void setup() {
   Serial.begin(115200);
-  delay(1000); // Allow UART to stabilize
+  delay(1000);
 
-  // Initialize DHT22
-  dht.begin();
+  Serial.println("\n======================================");
+  Serial.println(" SMART CLASSROOM ENVIRONMENTAL MONITOR");
+  Serial.println(" Target: airquality-monitoring.onrender.com");
+  Serial.println("======================================");
 
-  // Initialize LEDs
-  pinMode(GREEN_LED, OUTPUT);
-  pinMode(YELLOW_LED, OUTPUT);
+  // Initialize Bulb Pins
+  pinMode(WHITE_LED, OUTPUT);
   pinMode(RED_LED, OUTPUT);
 
-  // Turn OFF all LEDs initially
-  setLEDs(false, false, false);
+  // Quick Self-Test: Flash White then Red
+  digitalWrite(WHITE_LED, HIGH); delay(400); digitalWrite(WHITE_LED, LOW);
+  digitalWrite(RED_LED, HIGH);   delay(400); digitalWrite(RED_LED, LOW);
 
-  Serial.println();
-  Serial.println("==================================================");
-  Serial.println(" Smart Classroom Environmental Monitoring System  ");
-  Serial.println(" Target: https://airquality-monitoring.onrender.com");
-  Serial.println("==================================================");
+  // Initialize Sensor
+  dht.begin();
+  delay(1000);
 
   // Connect to Wi-Fi
-  connectToWiFi();
+  connectWiFi();
+
+  Serial.println("System Initialized.\n");
 }
 
-// ==============================================================================
-// Arduino Loop
-// ==============================================================================
+// ==========================================
+// 10. Main Loop
+// ==========================================
 void loop() {
   unsigned long currentMillis = millis();
 
-  // 1. Maintain Wi-Fi connection
-  if (currentMillis - lastWiFiCheckTime >= WIFI_CHECK_INTERVAL_MS) {
-    lastWiFiCheckTime = currentMillis;
+  // Reconnect Wi-Fi gently every 10 seconds if disconnected
+  if (currentMillis - lastWiFiCheck >= 10000) {
+    lastWiFiCheck = currentMillis;
     if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("[WiFi Alert] Reconnecting to Wi-Fi...");
+      Serial.println("[WiFi] Reconnecting...");
       WiFi.reconnect();
     }
   }
 
-  // 2. Read sensor and transmit telemetry periodically (every 5 seconds)
-  if (currentMillis - lastTelemetryTime >= TELEMETRY_INTERVAL_MS) {
-    lastTelemetryTime = currentMillis;
-
-    // Read temperature and humidity
-    float temperature = dht.readTemperature();
-    float humidity = dht.readHumidity();
-
-    // Check sensor readings
-    if (isnan(temperature) || isnan(humidity)) {
-      Serial.println("[Sensor Alert] Failed to read from DHT22 sensor!");
-      setLEDs(false, false, false);
-      return;
-    }
-
-    // Display sensor readings locally
-    Serial.println("----------------------------------");
-    Serial.printf("Temperature: %.2f °C | Humidity: %.2f %%\n", temperature, humidity);
-
-    // Temperature-based LED indication
-    if (temperature < NORMAL_TEMP) {
-      setLEDs(true, false, false);
-      Serial.println("Status: NORMAL - Green LED ON (GPIO 16)");
-    } else if (temperature <= HIGH_TEMP) {
-      setLEDs(false, true, false);
-      Serial.println("Status: WARNING - Yellow LED ON (GPIO 17)");
-    } else {
-      setLEDs(false, false, true);
-      Serial.println("Status: HIGH - Red LED ON (GPIO 18)");
-    }
-
-    // Transmit reading to live Render cloud dashboard
-    sendTelemetry(temperature, humidity);
-
-    Serial.println("----------------------------------");
+  // Read DHT22 every 2.5 seconds
+  if (currentMillis - lastSensorRead >= SENSOR_INTERVAL) {
+    lastSensorRead = currentMillis;
+    readSensor();
   }
+
+  // Upload to Render every 5 seconds
+  if (currentMillis - lastUpload >= UPLOAD_INTERVAL) {
+    lastUpload = currentMillis;
+    uploadData();
+  }
+
+  delay(50);
 }
